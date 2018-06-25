@@ -1,0 +1,470 @@
+---
+title: "Red wine-Proj"
+author: "Zheqi Wu"
+date: "2/14/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data split}
+set.seed(123)
+# read all datasets
+red = read.csv("winequality-red.csv")
+red_index = sample(c(1:1599), 1599)
+red = red[red_index, ]
+white = read.csv("winequality-white.csv")
+white_index = sample(c(1:4898), 4898)
+white = white[white_index, ]
+
+# split data into train, test and final test set seperately
+red_train = red[c(1:1023), ]
+red_test = red[c(1024:1280), ]
+red_hidden = red[c(1281:1599), ]
+white_train = white[c(1:3135), ]
+white_test = white[c(3135:3919), ]
+white_hidden = white[c(3920:4898), ]
+
+# add type as a covariate and split data
+red$type = 1
+white$type = 0
+total = rbind(red, white)
+
+train = rbind(red[c(1:1023), ], white[c(1:3135), ])
+test = rbind(red[c(1024:1280), ], white[c(3135:3919), ])
+hidden = rbind(red[c(1281:1599), ], white[c(3920:4898), ])
+```
+
+```{r pca projection}
+pca.wine = prcomp(train)
+# by quality
+# pca.proj = as.matrix(train) %*% pca.wine$rotation[, 1:2]
+# train = as.data.frame(train)
+# cols = character(nrow(train)) 
+# cols[train$quality==3] <- "red"
+# cols[train$quality==4] <- "orange"
+# cols[train$quality==5] <- "yellow"
+# cols[train$quality==6] <- "green"
+# cols[train$quality==7] <- "blue"
+# cols[train$quality==8] <- "purple"
+# cols[train$quality==9] <- "black"
+# plot(pca.proj, col=cols)
+
+# by type
+pca.proj.red = as.matrix(cbind(red_train, 1)) %*% pca.wine$rotation[, 1:3]
+pca.proj.white = as.matrix(cbind(white_train, 0)) %*% pca.wine$rotation[, 1:3]
+plot(pca.proj.red, col="red")
+points(pca.proj.white, col="blue")
+cols = character(nrow(train))
+cols[1:1023] <- "red"
+cols[1024:4158] <- "blue"
+pairs(rbind(pca.proj.red, pca.proj.white), col=cols)
+```
+
+```{r collinearity}
+library(GGally)
+set.seed(2183)
+ggpairs(train)
+```
+
+```{r linear reg}
+lm_accuracy = function(train, test){
+  ## fit training data
+  lm.out = lm(quality ~ ., data=train)
+  train_prediction = round(predict(lm.out))
+  
+  ## training accuracy
+  train_accu_marg = 0
+  for (i in 1:nrow(train)){
+    train_accu_marg = train_accu_marg + ifelse((as.numeric(train_prediction[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(train_prediction[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+  }
+  train_accu_abs = mean(as.numeric(train_prediction) == as.numeric(train$quality))
+  train_accu_marg = train_accu_marg / nrow(train)
+  
+  ## predict testing data
+  test_prediction = round(predict(lm.out, test))
+  
+  ## testing accuracy
+  test_accu_marg = 0
+  for (i in 1:nrow(test)){
+    test_accu_marg = test_accu_marg + ifelse((as.numeric(test_prediction[i]) <= as.numeric(test$quality[i]) + 1) && (as.numeric(test_prediction[i]) >= as.numeric(test$quality[i]) - 1), 1, 0)
+  }
+  test_accu_abs = mean(as.numeric(test_prediction) == as.numeric(test$quality))
+  test_accu_marg = test_accu_marg / nrow(test)
+  
+  ## train and test mse
+  train_mse = sum((as.numeric(train_prediction) - as.numeric(train$quality))^2) / nrow(train)
+  test_mse = sum((as.numeric(test_prediction) - as.numeric(test$quality))^2) / nrow(test)
+  
+  return(list("lm.out" = lm.out, "train_accu_abs" = train_accu_abs, "train_accu_marg" = train_accu_marg, "test_accu_abs" = test_accu_abs, "test_accu_marg" = test_accu_marg, "train_mse" = train_mse, "test_mse" = test_mse))
+}
+lm.result = lm_accuracy(train, test)
+summary(lm.result$lm.out)
+lm.coef = as.data.frame(summary(lm.result$lm.out)$coefficients[c(2,3,5,7:12) ,c(1,4)])
+lm.coef = lm.coef[order(lm.coef$`Pr(>|t|)`), ]
+lm.coef = lm.coef[order(abs(lm.coef$Estimate), decreasing = TRUE), ]
+barplot(lm.coef$Estimate, names.arg = rownames(lm.coef), xlab="coefficient", ylab="variable", main="Linear model coefficients", ylim=c(-5, 3), las=2)
+
+par(mfrow=c(1,2))
+lm.red.result = lm_accuracy(red_train, red_test)
+summary(lm.red.result$lm.out)
+lm.red.coef = as.data.frame(summary(lm.red.result$lm.out)$coefficients[c(3,6,7,10,11) ,c(1,4)])
+lm.red.coef = lm.red.coef[order(lm.red.coef$`Pr(>|t|)`), ]
+lm.red.coef = lm.red.coef[order(abs(lm.red.coef$Estimate), decreasing = TRUE), ]
+barplot(lm.red.coef$Estimate, names.arg = rownames(lm.red.coef), xlab="coefficient", ylab="variable", main="Coefficients for red wine", las=2)
+
+lm.wh.result = lm_accuracy(white_train, white_test)
+summary(lm.wh.result$lm.out)
+lm.wh.coef = as.data.frame(summary(lm.wh.result$lm.out)$coefficients[c(3,5,6,8,9,10,11) ,c(1,4)])
+lm.wh.coef = lm.wh.coef[order(lm.wh.coef$`Pr(>|t|)`), ]
+lm.wh.coef = lm.wh.coef[order(abs(lm.wh.coef$Estimate), decreasing = TRUE), ]
+barplot(lm.wh.coef$Estimate, names.arg = rownames(lm.wh.coef), xlab="coefficient", ylab="variable", main="Coefficients for white wine", ylim=c(-5, 3), las=2)
+
+lm.hid = lm_accuracy(rbind(train, test), hidden)
+lm.hid
+```
+
+```{r ordered logistic}
+# ordered logistic/probit
+library(MASS)
+
+# function that:
+## 1. fit the training set into a selected polr model
+## 2. make prediction on the test set
+## 3. return the prediction accuracy and mse
+polr_accuracy = function(train, test, model){
+  ## fit training data
+  data = model.matrix(quality~.,train)[,-1]
+  polr.out = polr(as.factor(train$quality) ~ data, method = c(model), Hess = TRUE)
+  train_prediction = predict(polr.out, type="class")
+  train_prediction = as.numeric(train_prediction) + 2
+  coef_var = diag(solve(polr.out$Hessian))[1:11]
+  
+  ## training accuracy
+  train_accu_marg = 0
+  for (i in 1:nrow(train)){
+    train_accu_marg = train_accu_marg + ifelse((train_prediction[i] <= train$quality[i] + 1) && (train_prediction[i] >= train$quality[i] - 1), 1, 0)
+  }
+  train_accu_abs = mean(train_prediction == train$quality)
+  train_accu_marg = train_accu_marg / nrow(train)
+  
+  ## predict testing data
+  data = model.matrix(quality~.,test)[,-1]
+  test_prediction = predict(polr.out, newdata = data, type="class")
+  test_prediction = as.numeric(test_prediction) + 2
+  
+  ## testing accuracy
+  test_accu_marg = 0
+  for (i in 1:nrow(test)){
+    test_accu_marg = test_accu_marg + ifelse((test_prediction[i] <= test$quality[i] + 1) && (test_prediction[i] >= test$quality[i] - 1), 1, 0)
+  }
+  test_accu_abs = mean(test_prediction == test$quality)
+  test_accu_marg = test_accu_marg / nrow(test)
+  
+  ## train and test mse
+  train_mse = sum((as.numeric(train_prediction) - as.numeric(train$quality))^2) / nrow(train)
+  test_mse = sum((as.numeric(test_prediction) - as.numeric(test$quality))^2) / nrow(test)
+  return(list("polr.out" = polr.out, "coef_var" = coef_var, "train_accu_abs" = train_accu_abs, "train_accu_marg" = train_accu_marg, "test_accu_abs" = test_accu_abs, "test_accu_marg" = test_accu_marg, "train_mse" = train_mse, "test_mse" = test_mse))
+}
+
+library(VGAM)
+polr.result = polr_accuracy(train, test, "logistic")
+odd = exp(polr.result$polr.out$coefficients)
+sort(odd)
+```
+
+```{r random forest}
+## random forest
+set.seed(123)
+# install.packages("randomForest")
+library(randomForest)
+
+rf_regre = function(train, test,mtry){
+  ## fit training data
+  data = model.matrix(quality~.,train)[,-1]
+  data_test = model.matrix(quality~.,test)[,-1]
+  
+  ## regression
+  rf.out2 =  randomForest(as.numeric(train$quality) ~ ., data=data, importance=TRUE, mtry=mtry,proximity=TRUE,type= "regression")
+  print(rf.out2)
+  ## Show "importance" of variables: higher value mean more important:
+  # For Regression, the first column is the mean decrease in accuracy
+  # and the second the mean decrease in MSE. 
+  importance=round(importance(rf.out2), 2)
+  
+  ## predict testing data
+  # install.package("hydroGOF")
+  library(hydroGOF)
+  #data_test = model.matrix(quality~.,test)[,-1]
+  test_prediction = predict(rf.out2, newdata = data_test)
+  train_prediction = predict(rf.out2, newdata = data)
+  train_mse = sum((as.numeric(train_prediction) - as.numeric(train$quality))^2) / nrow(train)
+  test_mse = sum((as.numeric(test_prediction) - as.numeric(test$quality))^2) / nrow(test)
+  
+  accu_train = sum(round(train_prediction)==as.numeric(train$quality))/nrow(train)
+  accu_test = sum(round(test_prediction)==as.numeric(test$quality))/nrow(test)
+  
+  ## training accuracy
+  train_accu_marg = 0
+  for (i in 1:nrow(train)){
+    train_accu_marg = train_accu_marg + ifelse((as.numeric(train_prediction[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(train_prediction[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+  }
+  train_accu_marg = train_accu_marg / nrow(train)
+  
+  ## testing accuracy
+  test_accu_abs = 0
+  test_accu_marg = 0
+  for (i in 1:nrow(test)){
+    test_accu_marg = test_accu_marg + ifelse((as.numeric(test_prediction[i]) <= as.numeric(test$quality[i]) + 1) && (as.numeric(test_prediction[i]) >= as.numeric(test$quality[i]) - 1), 1, 0)
+  }
+  test_accu_marg = test_accu_marg / nrow(test)
+  
+  return(list("MSE_train" = train_mse,"MSE_test"=test_mse,"accuracy_train"=accu_train,"accuracy_test"=accu_test,"train_accu_marg"=train_accu_marg,"test_accu_marg"=test_accu_marg,"importance"=importance))
+}
+
+rf_regre(rbind(train,test),hidden,mtry=6)
+## plot importance
+data = model.matrix(quality~.,train)[,-1]
+data_test = model.matrix(quality~.,test)[,-1]
+rf.out =  randomForest(as.numeric(train$quality) ~ ., data=data, mtry=6,proximity=TRUE,type= "regression") #importance=TRUE
+tree.e = getTree(rf.out, k=3, labelVar=TRUE)
+plot(tree.e)
+adjust_importance = importance(rf.out)/importance(rf.out)[11]*100
+impor_order=order(adjust_importance)
+names=rownames(adjust_importance)[impor_order][1:12]
+#  horizontal barplot
+positions = names
+impor_data = data.frame(name=names,value=adjust_importance[impor_order][1:12])
+ggplot(impor_data, aes(x=name,value)) + geom_col()+coord_flip()+ scale_x_discrete(limits = positions)
+```
+
+```{r xbg}
+require(xgboost)
+train=rbind(train,test)
+test=hidden
+x.train=as.matrix(train[,-12])
+y.train=as.factor(train$quality)
+x.test=as.matrix(test[,-12])
+#XGB model
+bst <- xgboost(data = x.train, label = as.vector(train[,12]), eta = 0.1,
+max_depth = 12, nround=25,objective = "multi:softmax",num_class=10)
+pred <- predict(bst, x.test)
+pred_train=predict(bst, x.train)
+#acc
+accu_train = sum(pred_train==as.factor(train$quality))/nrow(train)
+accu_test= sum(pred==as.factor(test$quality))/nrow(test)
+
+#marginal accu
+xgb_indicator= rep(0, nrow(test))
+xgbt_indicator = rep(0, nrow(train))
+for (i in 1:nrow(train)){
+  ## return 1 if it's correctly predicted
+  xgbt_indicator[i] = ifelse((as.numeric(pred_train[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(pred_train[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+}
+
+for (i in 1:nrow(test)){
+  ## return 1 if it's correctly predicted
+  xgb_indicator[i] = ifelse((as.numeric(pred[i]) <= as.numeric(test$quality[i]) + 1) && (as.numeric(pred[i]) >= as.numeric(test$quality[i]) - 1), 1, 0)
+}
+xgbt_m_accuracy = sum(xgbt_indicator) / length(xgbt_indicator)
+xgb_m_accuracy = sum(xgb_indicator) / length(xgb_indicator)
+
+#mse
+library(hydroGOF)
+MSE_train = mse(pred_train,as.numeric(train$quality))
+MSE_test = mse(pred,as.numeric(test$quality))
+
+#feature analysis
+xgb_inp=xgb.importance(colnames(x.train),model=bst)
+xgb.plot.importance(xgb_inp, rel_to_first = TRUE, xlab = "Relative importance")
+library(ggplot2)
+(gg <- xgb.ggplot.importance(xgb_inp, measure = "Frequency", rel_to_first = TRUE))
+gg + ggplot2::ylab("Frequency")
+plot(xgb_inp)
+```
+
+```{r svm}
+library(e1071)
+svm_accuracy = function(train, test){
+  ## fit training data
+  #svm.tune = tune.svm(as.factor(quality)~., data=train, gamma = 1.3, cost=c(2,4,6,8))
+  svm.out = svm(as.factor(quality)~., data=train, gamma=1.3, cost=6)
+  #svm.out = svm.tune$best.model
+  train_prediction = predict(svm.out, newdata=train)
+  
+  ## training accuracy
+  train_accu_abs = 0
+  train_accu_marg = 0
+  for (i in 1:nrow(train)){
+    train_accu_marg = train_accu_marg + ifelse((as.numeric(train_prediction[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(train_prediction[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+  }
+  train_accu_abs = mean(as.numeric(train_prediction) == as.numeric(train$quality))
+  train_accu_marg = train_accu_marg / nrow(train)
+  
+  ## predict testing data
+  test_prediction = predict(svm.out, newdata=test)
+  
+  ## testing accuracy
+  test_accu_abs = 0
+  test_accu_marg = 0
+  for (i in 1:nrow(test)){
+    test_accu_marg = test_accu_marg + ifelse((as.numeric(test_prediction[i]) <= as.numeric(test$quality[i]) + 1) && (as.numeric(test_prediction[i]) >= as.numeric(test$quality[i]) - 1), 1, 0)
+  }
+  test_accu_abs = mean(as.numeric(test_prediction) == as.numeric(test$quality))
+  test_accu_marg = test_accu_marg / nrow(test)
+  
+  ## train and test mse
+  train_mse = sum((as.numeric(train_prediction) - as.numeric(train$quality))^2) / nrow(train)
+  test_mse = sum((as.numeric(test_prediction) - as.numeric(test$quality))^2) / nrow(test)
+  
+  return(list("train_accu_abs" = train_accu_abs, "train_accu_marg" = train_accu_marg, "test_accu_abs" = test_accu_abs, "test_accu_marg" = test_accu_marg, "train_mse" = train_mse, "test_mse" = test_mse))
+}
+svm.out = svm_accuracy(train, test)
+```
+
+```{r multisvm}
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+multi.svm = function(train, test){
+  train = as.data.frame(train)
+  n = numeric(0)
+  train_prediction = matrix(rep(0, 21 * nrow(train)), nrow = nrow(train))
+  prediction = matrix(rep(0, 21 * nrow(test)), nrow = nrow(test))
+  count = 0
+  for (i in min(train$quality):(max(train$quality) - 1)){
+    for (j in (i+1):max(train$quality)){
+      count = count + 1
+      train.sub = train[((as.numeric(train$quality) == i) | (as.numeric(train$quality) == j)),  ]
+      svm.out = svm(quality~., data=train.sub)
+      train_prediction[ ,count] = round(predict(svm.out, newdata=train, type="class"))
+      prediction[ ,count] = round(predict(svm.out, newdata=test, type="class"))
+    }
+  }
+  train.result = rep(0, nrow(train))
+  for (i in 1:nrow(train_prediction)){
+    train.result[i] = Mode(train_prediction[i, ])
+  }
+  
+  multisvm.result = rep(0, nrow(test))
+  for (i in 1:nrow(prediction)){
+    multisvm.result[i] = Mode(prediction[i, ])
+  }
+
+  ## training accuracy
+  train_accu_marg = 0
+  for (i in 1:nrow(train)){
+    train_accu_marg = train_accu_marg + ifelse((as.numeric(train.result[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(train.result[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+  }
+  train_accu_abs = mean(as.numeric(train.result) == as.numeric(train$quality))
+  train_accu_marg = train_accu_marg / nrow(train)
+  
+  ## test accuracy
+  test_accu_marg = 0
+  for (i in 1:nrow(test)){
+    test_accu_marg = test_accu_marg + ifelse((as.numeric(multisvm.result[i]) <= as.numeric(test$quality[i]) + 1) && (as.numeric(multisvm.result[i]) >= as.numeric(test$quality[i]) - 1), 1, 0)
+    }
+  test_accu_abs = mean(as.numeric(multisvm.result) == as.numeric(test$quality))
+  test_accu_marg = test_accu_marg / nrow(test)
+  
+  
+  
+  ## train and test mse
+  train_mse = sum((as.numeric(train.result) - as.numeric(train$quality))^2) / nrow(train)
+  test_mse = sum((as.numeric(multisvm.result) - as.numeric(test$quality))^2) / nrow(test)
+  
+  return(list("train_accu_abs" = train_accu_abs, "train_accu_marg" = train_accu_marg, "test_accu_abs" = test_accu_abs, "test_accu_marg" = test_accu_marg, "train_mse" = train_mse, "test_mse" = test_mse))
+}
+
+multi.svm(rbind(train, test), hidden)
+```
+
+```{r lda}
+## LDA and QDA
+library(MASS)
+lda_regre = function(train, test){
+  data = model.matrix(quality~.,train)[,-1]
+  data_test = model.matrix(quality~.,test)[,-1]
+  lda.out = lda(as.factor(train$quality) ~ ., data=as.data.frame(data))
+  
+  ## prediction
+  test_prediction = predict(lda.out,newdata = as.data.frame(data_test))
+  test_prediction =   as.numeric(test_prediction$class)
+  train_prediction = predict(lda.out,newdata = as.data.frame(data))
+  train_prediction = as.numeric(train_prediction$class)
+  #MSE_train = mse(train_prediction,as.numeric(train$quality))
+  #MSE_test = mse(test_prediction,as.numeric(test$quality))
+  train_mse = sum((as.numeric(train_prediction) - as.numeric(train$quality))^2) / nrow(train)
+  test_mse = sum((as.numeric(test_prediction) - as.numeric(test$quality))^2) / nrow(test)
+  
+  accu_train = sum(round(train_prediction)==as.numeric(train$quality))/nrow(train)
+  accu_test = sum(round(test_prediction)==as.numeric(test$quality))/nrow(test)
+  
+  ## training accuracy
+  train_accu_marg = 0
+  for (i in 1:nrow(train)){
+    train_accu_marg = train_accu_marg + ifelse((as.numeric(train_prediction[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(train_prediction[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+  }
+  train_accu_marg = train_accu_marg / nrow(train)
+  
+  ## testing accuracy
+  test_accu_abs = 0
+  test_accu_marg = 0
+  for (i in 1:nrow(test)){
+    test_accu_marg = test_accu_marg + ifelse((as.numeric(test_prediction[i]) <= as.numeric(test$quality[i]) + 1) && (as.numeric(test_prediction[i]) >= as.numeric(test$quality[i]) - 1), 1, 0)
+  }
+  test_accu_marg = test_accu_marg / nrow(test)
+  
+  return(list("MSE_train" = train_mse,"MSE_test"=test_mse,"accuracy_train"=accu_train,"accuracy_test"=accu_test,"train_accu_marg"=train_accu_marg,"test_accu_marg"=test_accu_marg))
+}
+
+lda_regre(train,test)
+#lda_regre(red_train, red_test)
+#lda_regre(white_train, white_test)
+
+#some group is too small for 'qda'
+#qda = function(train, test){
+ #  data = model.matrix(quality~.,train)[,-1]
+ # data_test = model.matrix(quality~.,test)[,-1]
+ # qda.out = qda(as.factor(train$quality) ~ ., data=as.data.frame(data))
+  
+#}
+
+```
+
+```{r knn}
+library(class)
+Ks=seq(1,63,1)
+knn=matrix(0,nrow=length(Ks),ncol=2)
+for (k in Ks){
+knn.out=knn(train[,-12], train[,-12],  as.factor(train[,12]), k = 5,prob = FALSE)
+knn_indicator = rep(0, nrow(test))
+for (i in 1:nrow(train)){
+  ## return 1 if it's correctly predicted
+  knn_indicator[i] = ifelse((as.numeric(knn.out[i]) <= as.numeric(train$quality[i]) + 1) && (as.numeric(knn.out[i]) >= as.numeric(train$quality[i]) - 1), 1, 0)
+}
+knn_accuracy = sum(knn_indicator) / length(knn_indicator)
+knn[k,1]=k
+knn[k,2]=knn_accuracy
+}
+#knn
+a=which.max(knn[,2])
+knn.out=knn(train[,-12], test[,-12],  as.factor(train[,12]), k = a,prob = FALSE)
+knn.out2=knn(train[,-12], train[,-12],  as.factor(train[,12]), k = a,prob = FALSE)
+
+accu_train = sum(as.factor(knn.out2)==as.factor(train$quality))/nrow(train)
+accu_test = sum(as.factor(knn.out)==as.factor(test$quality))/nrow(test)
+train_conf=table(knn.out2,train$quality)
+test_conf=table(knn.out,test$quality)
+train_conf
+test_conf
+marg_train=(1706+sum(diag(train_conf)))/nrow(train)
+marg_test=(464+sum(diag(test_conf)))/nrow(test)
+#mse
+train_mse = sum((as.numeric(as.factor(knn.out2)) - as.numeric(train$quality))^2) / nrow(train)
+test_mse = sum((as.numeric(as.factor(knn.out)) - as.numeric(test$quality))^2) / nrow(test)
+```
